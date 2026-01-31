@@ -130,39 +130,65 @@ async def get_free_slots():
         return await cursor.fetchall()
 
 
-async def book_slot_safe(user_id: int, slot_id: int) -> bool:
-    name = await get_user_name(user_id)
-    if not name:
-        return False
-        
+async def book_slot_safe(user_id: int, slot_id: int, user_name: str):
     async with aiosqlite.connect(DB_NAME) as db:
-        try:
-            await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute("SELECT is_booked FROM slots WHERE id = ?", (slot_id,))
-            row = await cursor.fetchone()
-            if row is None or row[0] == 1:
-                return False
+        cursor = await db.execute("SELECT user_id FROM bookings WHERE slot_id = ?", (slot_id,))
+        row = await cursor.fetchone()
+        
+        if row:
+            if row[0] == user_id:
+                return "already_yours"
+            return "taken_by_other"
             
-            await db.execute("UPDATE slots SET is_booked = 1 WHERE id = ?", (slot_id,))
+        try:
             await db.execute(
-                "INSERT INTO bookings (user_id, user_name, slot_id) VALUES (?, ?, ?)", 
-                (user_id, name, slot_id)
+                "INSERT INTO bookings (user_id, slot_id, user_name) VALUES (?, ?, ?)",
+                (user_id, slot_id, user_name)
             )
+            await db.execute("UPDATE slots SET is_booked = 1 WHERE id = ?", (slot_id,))
             await db.commit()
-            return True
+            return "success"
         except Exception:
-            await db.execute("ROLLBACK")
-            return False
+            return "error"
+
+
+async def count_user_bookings(user_id: int) -> int:
+    """Возвращает количество будущих записей пользователя."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        now = datetime.now().isoformat()
+        query = "SELECT COUNT(*) FROM bookings b JOIN slots s ON b.slot_id = s.id WHERE b.user_id = ? AND s.start_time > ?"
+        cursor = await db.execute(query, (user_id, now))
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
 
 async def get_user_bookings(user_id: int):
+    """Возвращает список будущих бронирований пользователя."""
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute("""
-            SELECT b.id, s.start_time FROM bookings b
+        now = datetime.now().isoformat()
+        query = """
+            SELECT b.id, s.start_time 
+            FROM bookings b
             JOIN slots s ON b.slot_id = s.id
-            WHERE b.user_id = ? ORDER BY s.start_time
-        """, (user_id,))
+            WHERE b.user_id = ? AND s.start_time > ?
+            ORDER BY s.start_time ASC
+        """
+        cursor = await db.execute(query, (user_id, now))
         return await cursor.fetchall()
+
+
+async def get_booking_start_time(booking_id: int):
+    """Возвращает start_time (ISO строку) для конкретной записи."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        query = """
+            SELECT s.start_time 
+            FROM bookings b
+            JOIN slots s ON b.slot_id = s.id
+            WHERE b.id = ?
+        """
+        cursor = await db.execute(query, (booking_id,))
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
 
 async def cancel_booking(booking_id: int):
@@ -187,6 +213,55 @@ async def get_all_bookings_report():
         cursor = await db.execute(query)
         return await cursor.fetchall()
     
+
+async def get_bookings_for_day(target_date: date):
+    """Получает все записи на конкретную дату."""
+    day_str = target_date.isoformat()
+    async with aiosqlite.connect(DB_NAME) as db:
+        query = """
+            SELECT s.start_time, b.user_name 
+            FROM bookings b
+            JOIN slots s ON b.slot_id = s.id
+            WHERE s.start_time LIKE ?
+            ORDER BY s.start_time ASC
+        """
+        cursor = await db.execute(query, (f"{day_str}%",))
+        return await cursor.fetchall()
+
+
+async def get_bookings_in_time_range(start_dt: datetime, end_dt: datetime):
+    """
+    Ищет записи, у которых start_time попадает в интервал [start_dt, end_dt].
+    Возвращает список кортежей (user_id, start_time, full_name).
+    """
+    start_str = start_dt.isoformat()
+    end_str = end_dt.isoformat()
+    async with aiosqlite.connect(DB_NAME) as db:
+        query = """
+            SELECT b.user_id, s.start_time, u.full_name
+            FROM bookings b
+            JOIN slots s ON b.slot_id = s.id
+            JOIN users u ON b.user_id = u.user_id
+            WHERE s.start_time >= ? AND s.start_time < ?
+        """
+        cursor = await db.execute(query, (start_str, end_str))
+        return await cursor.fetchall()
+
+
+async def clear_day_data(target_date: date):
+    """Удаляет слоты и записи за конкретное число."""
+    day_str = target_date.isoformat()
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+            DELETE FROM bookings WHERE slot_id IN (
+                SELECT id FROM slots WHERE start_time LIKE ?
+            )
+        """, (f"{day_str}%",))
+        await db.execute(
+            "DELETE FROM slots WHERE start_time LIKE ?",
+            (f"{day_str}%",))
+        await db.commit()
+
 
 async def clear_all_bookings_and_slots():
     """Полная очистка всех записей и освобождение всех слотов."""

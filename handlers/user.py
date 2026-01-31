@@ -9,7 +9,8 @@ from states import UserRegistration
 from db import (
     get_free_slots, book_slot_safe, get_user_bookings, 
     cancel_booking, set_user_name, get_user_name,
-    get_slot_time_str, get_slot_time_by_booking
+    get_slot_time_str, get_slot_time_by_booking,
+    get_booking_start_time, count_user_bookings
 )
 
 
@@ -17,13 +18,16 @@ router = Router()
 
 START_TEXT = (
     "👋 **Главное меню**\n\n"
-    "Доступные команды:\n"
-    "/name — Регистрация (Имя и Фамилия)\n"
-    "/new — Записаться на занятие\n"
-    "/my — Просмотр и редактирование записей\n"
+    "Доступные команды:\n\n"
+    "/name — Регистрация (Имя и Фамилия)\n\n"
+    "/new — Записаться на занятие\n\n"
+    "/my — Просмотр и редактирование записей\n\n"
     "/admin — Функции для администратора"
 )
 
+MIN_MINUTES_TO_CANCEL = 60
+
+MAX_USER_BOOKINGS = 3
 
 async def check_registration(message: Message) -> bool:
     user_id = message.from_user.id
@@ -119,27 +123,69 @@ async def user_choose_day(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("slot:"))
 async def do_booking(callback: CallbackQuery):
+    
     slot_id = int(callback.data.split(":")[1])
-    
-    slot_time = await get_slot_time_str(slot_id)
+    user_id = callback.from_user.id
 
-    if await book_slot_safe(callback.from_user.id, slot_id):
-        await callback.message.edit_text(f"✅ Вы успешно записаны на **{slot_time}**!", parse_mode="Markdown")
-    else:
-        await callback.message.edit_text(f"⚠ Время **{slot_time}** уже занято.", parse_mode="Markdown")
+    active_bookings_count = await count_user_bookings(user_id)
     
+    if active_bookings_count >= MAX_USER_BOOKINGS:
+        await callback.message.edit_text(
+            "🛑 Превышен лимит записей!\n\n"
+            f"Вы можете иметь не более {MAX_USER_BOOKINGS} активных записей одновременно."
+        )
+    else:
+
+        user_name = await get_user_name(user_id)
+        slot_time = await get_slot_time_str(slot_id)
+
+        result = await book_slot_safe(user_id, slot_id, user_name)
+
+        if result == "success":
+            await callback.message.edit_text(f"✅ Вы успешно записаны на **{slot_time}**!", parse_mode="Markdown")
+        
+        elif result == "already_yours":
+            await callback.answer("Вы уже записаны на это время!", show_alert=False)
+            await callback.message.edit_text(f"✅ Вы уже записаны на **{slot_time}**.", parse_mode="Markdown")
+        
+        elif result == "taken_by_other":
+            await callback.message.edit_text(f"⚠ Извините, время **{slot_time}** только что занял другой человек.")
+        
+        else:
+            await callback.message.edit_text("❌ Произошла ошибка при бронировании.")
+
     await callback.message.answer(START_TEXT, parse_mode="Markdown")
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("cancel:"))
 async def user_cancel(callback: CallbackQuery):
-    b_id = int(callback.data.split(":")[1])
+    booking_id = int(callback.data.split(":")[1])
+    start_time_iso = await get_booking_start_time(booking_id)
     
-    slot_time = await get_slot_time_by_booking(b_id)
+    if not start_time_iso:
+        await callback.answer("Запись не найдена (возможно, уже удалена).", show_alert=True)
+        return await my_bookings(callback.message)
+
+    start_dt = datetime.fromisoformat(start_time_iso)
+    time_difference = start_dt - datetime.now()
+
+    if time_difference.total_seconds() < MIN_MINUTES_TO_CANCEL*60:
+        await callback.answer(
+            "⚠ Отмена невозможна!\n\n"
+            f"До начала занятия осталось меньше {MIN_MINUTES_TO_CANCEL} минут.\n"
+            "Свяжитесь с администратором лично.", 
+            show_alert=True
+        )
+        return
+
+    await cancel_booking(booking_id)
     
-    await cancel_booking(b_id)
-    await callback.message.edit_text(f"❌ Запись на **{slot_time}** отменена.", parse_mode="Markdown")
+    formatted_time = start_dt.strftime("%d.%m в %H:%M")
+    await callback.message.edit_text(
+        f"✅ Запись на **{formatted_time}** успешно отменена.", 
+        parse_mode="Markdown"
+    )
     
     await callback.message.answer(START_TEXT, parse_mode="Markdown")
     await callback.answer()
