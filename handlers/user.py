@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from datetime import date, datetime
 
+from logger_config import logger
 from keyboards import days_keyboard, slots_keyboard, bookings_keyboard
 from states import UserRegistration
 from db import (
@@ -143,6 +144,7 @@ async def do_booking(callback: CallbackQuery):
 
         if result == "success":
             await callback.message.edit_text(f"✅ Вы успешно записаны на **{slot_time}**!", parse_mode="Markdown")
+            logger.info(f"ЗАПИСЬ: Пользователь {user_id} на {slot_time}")
         
         elif result == "already_yours":
             await callback.answer("Вы уже записаны на это время!", show_alert=False)
@@ -161,6 +163,7 @@ async def do_booking(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("cancel:"))
 async def user_cancel(callback: CallbackQuery):
     booking_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
     start_time_iso = await get_booking_start_time(booking_id)
     
     if not start_time_iso:
@@ -186,6 +189,7 @@ async def user_cancel(callback: CallbackQuery):
         f"✅ Запись на **{formatted_time}** успешно отменена.", 
         parse_mode="Markdown"
     )
+    logger.info(f"ОТМЕНА: Пользователь {user_id} отменил {formatted_time}")
     
     await callback.message.answer(START_TEXT, parse_mode="Markdown")
     await callback.answer()

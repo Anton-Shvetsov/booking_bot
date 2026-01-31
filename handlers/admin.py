@@ -5,6 +5,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 from datetime import date, timedelta, time, datetime
+from logger_config import logger
 import contextlib
 
 from filters import IsAdmin
@@ -132,6 +133,8 @@ async def confirm_slots(callback: CallbackQuery, state: FSMContext, bot: Bot):
         f"➖ Удалено: {deleted}\n"
         f"🔔 Уведомлено пользователей: {notified}"
     )
+    logger.info(f"АДМИН: Изменены слоты на {day_str} (добавлено {added}, удалено {deleted})")
+    
     await callback.message.edit_text(result_text, parse_mode="Markdown")
     await callback.message.answer(ADMIN_MENU, parse_mode="Markdown")
     await callback.answer()
