@@ -10,8 +10,8 @@ from states import UserRegistration
 from db import (
     get_free_slots, book_slot_safe, get_user_bookings, 
     cancel_booking, set_user_name, get_user_name,
-    get_slot_time_str, get_slot_time_by_booking,
-    get_booking_start_time, count_user_bookings
+    get_slot_time_str, get_booking_start_time,
+    count_user_bookings, get_max_user_bookings
 )
 
 
@@ -27,8 +27,6 @@ START_TEXT = (
 )
 
 MIN_MINUTES_TO_CANCEL = 60
-
-MAX_USER_BOOKINGS = 3
 
 async def check_registration(message: Message) -> bool:
     user_id = message.from_user.id
@@ -70,7 +68,7 @@ async def process_name(message: Message, state: FSMContext):
 
     display_name = full_name
     if message.from_user.username:
-        display_name += f" (@{message.from_user.username})"
+        display_name += f" @{message.from_user.username}"
 
     await set_user_name(message.from_user.id, display_name)
     await state.clear()
@@ -129,6 +127,7 @@ async def do_booking(callback: CallbackQuery):
     user_id = callback.from_user.id
 
     active_bookings_count = await count_user_bookings(user_id)
+    MAX_USER_BOOKINGS = await get_max_user_bookings()
     
     if active_bookings_count >= MAX_USER_BOOKINGS:
         await callback.message.edit_text(

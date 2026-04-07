@@ -10,11 +10,10 @@ import contextlib
 
 from filters import IsAdmin
 from keyboards import days_keyboard, slots_tickbox
-from db import (add_slots_for_day, get_slots_on_day, 
-                delete_slot_by_time, get_all_bookings_report, 
-                clear_all_bookings_and_slots)
+from db import (add_slots_for_day, get_slots_on_day,
+                delete_slot_by_time, get_all_bookings_report,
+                clear_all_bookings_and_slots, set_max_user_bookings)
 from states import AdminAddSlots
-
 
 router = Router()
 router.message.filter(IsAdmin())
@@ -22,13 +21,19 @@ router.callback_query.filter(IsAdmin())
 
 ADMIN_MENU = (
     "👑 **Админ-панель**\n\n"
-    "/editslots — Управление расписанием (добавить/удалить слоты)\n"
+    "/editslots — Управление расписанием (добавить/удалить слоты)\n\n"
+    "/setmaxbookings <n> — Установка лимита записей для одного пользователя\n\n"
     "/all — Просмотреть все записи пользователей"
 )
 
 
 def get_admin_time_slots():
     return [time(hour=h, minute=30) for h in range(11, 22)]
+
+
+def escape_md(text: str) -> str:
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
 
 
 @router.message(Command("admin"))
@@ -91,6 +96,7 @@ async def toggle_slot(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(AdminAddSlots.choosing_slots, F.data == "confirm_slots")
 async def confirm_slots(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    admin_id = callback.from_user.id
     data = await state.get_data()
     selected_set = data.get("selected", set())
     day_str = data.get("day")
@@ -116,6 +122,7 @@ async def confirm_slots(callback: CallbackQuery, state: FSMContext, bot: Bot):
         user_id = await delete_slot_by_time(start_dt.isoformat())
         deleted += 1
         if user_id:
+            logger.info(f"ОТМЕНА: (АДМИН) Пользователь {user_id} на {start_dt.strftime('%d.%m в %H:%M')}")
             try:
                 await bot.send_message(
                     user_id, 
@@ -133,8 +140,8 @@ async def confirm_slots(callback: CallbackQuery, state: FSMContext, bot: Bot):
         f"➖ Удалено: {deleted}\n"
         f"🔔 Уведомлено пользователей: {notified}"
     )
-    logger.info(f"АДМИН: Изменены слоты на {day_str} (добавлено {added}, удалено {deleted})")
-    
+    logger.info(f"АДМИН ({admin_id}): Изменены слоты на {day_str} (добавлено {added}, удалено {deleted})")
+
     await callback.message.edit_text(result_text, parse_mode="Markdown")
     await callback.message.answer(ADMIN_MENU, parse_mode="Markdown")
     await callback.answer()
@@ -154,8 +161,24 @@ async def show_all_bookings(message: Message):
             if day_str != current_day:
                 report += f"\n📅 {day_str}\n"
                 current_day = day_str
+            user_info = escape_md(user_info)
             report += f"  • {dt.strftime('%H:%M')} — {user_info}\n"
         await message.answer(report, parse_mode="Markdown")
+    await message.answer(ADMIN_MENU, parse_mode="Markdown")
+
+
+@router.message(Command("setmaxbookings"))
+async def cmd_set_max_bookings(message: Message):
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Использование: /setmaxbookings <число>")
+        return await message.answer(ADMIN_MENU, parse_mode="Markdown")
+    value = int(parts[1])
+    await set_max_user_bookings(value)
+    await message.answer(
+        f"✅ Максимальное число активных записей установлено: **{value}**",
+        parse_mode="Markdown"
+    )
     await message.answer(ADMIN_MENU, parse_mode="Markdown")
 
 

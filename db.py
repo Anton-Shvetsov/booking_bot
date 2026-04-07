@@ -1,6 +1,12 @@
 import aiosqlite
+import asyncio
 from datetime import datetime, timedelta, date
 from config import DB_NAME
+
+_settings_cache: dict[str, int] = {}
+_settings_lock = asyncio.Lock()
+
+DEFAULT_MAX_USER_BOOKINGS = 2
 
 
 async def init_db():
@@ -27,6 +33,13 @@ async def init_db():
             user_id INTEGER PRIMARY KEY,
             full_name TEXT
         )""")
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS settings_limits (
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL CHECK (value >= 1)
+        )
+        """)
         await db.commit()
 
 
@@ -269,3 +282,44 @@ async def clear_all_bookings_and_slots():
         await db.execute("DELETE FROM bookings")
         await db.execute("DELETE FROM slots") 
         await db.commit()
+
+
+async def get_max_user_bookings() -> int:
+    async with _settings_lock:
+        if "max_user_bookings" in _settings_cache:
+            return _settings_cache["max_user_bookings"]
+        
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            "SELECT value FROM settings_limits WHERE key = 'max_user_bookings'"
+        )
+        res = await cursor.fetchone()
+
+        if res is None:
+            value = DEFAULT_MAX_USER_BOOKINGS
+            await set_max_user_bookings(value)
+        else:
+            value = int(res[0])
+    
+    async with _settings_lock:
+        _settings_cache["max_user_bookings"] = value
+
+    return value
+
+
+async def set_max_user_bookings(value: int):
+    value = max(value, 1)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO settings_limits (key, value)
+            VALUES ('max_user_bookings', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (value,)
+        )
+        await db.commit()
+
+    async with _settings_lock:
+        _settings_cache["max_user_bookings"] = value
