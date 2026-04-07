@@ -64,9 +64,9 @@ echo ===========================================================================
 
 if exist "%REPO_DIR%\env.example" (
     copy /y "%REPO_DIR%\env.example" "%REPO_DIR%\.env" >nul
-    echo Файл .env создан из env.example
+    echo .env created from env.example
 ) else (
-    echo ERROR: env.example не найден в %REPO_DIR%
+    echo ERROR: env.example not found at %REPO_DIR%
     pause
     exit /b 1
 )
