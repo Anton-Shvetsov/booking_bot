@@ -7,6 +7,11 @@ from config import ADMIN_IDS
 from db import get_bookings_for_day, clear_day_data, get_bookings_in_time_range
 
 
+def escape_md(text: str) -> str:
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
+
+
 async def send_daily_report_and_clear(bot: Bot):
     today = date.today()
     bookings = await get_bookings_for_day(today)
@@ -17,13 +22,14 @@ async def send_daily_report_and_clear(bot: Bot):
         report = f"📅 **Итоговый отчет за {today.strftime('%d.%m')}**:\n\n"
         for start_time_iso, user_info in bookings:
             time_str = datetime.fromisoformat(start_time_iso).strftime("%H:%M")
+            user_info = escape_md(user_info)
             report += f"✅ {time_str} — {user_info}\n"
     
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, report, parse_mode="Markdown")
         except Exception as e:
-            print(f"Ошибка отправки отчета админу {admin_id}: {e}")
+            logger.error(f"Не удалось отправить отчет за сегодня {admin_id}")
             
     await clear_day_data(today)
 
@@ -40,6 +46,7 @@ async def send_tomorrow_admin_report(bot: Bot):
         lines = []
         for start_time_iso, user_info in bookings:
             time_str = datetime.fromisoformat(start_time_iso).strftime("%H:%M")
+            user_info = escape_md(user_info)
             lines.append(f"📌 {time_str} — {user_info}")
         text = header + "\n".join(lines)
         
@@ -47,13 +54,10 @@ async def send_tomorrow_admin_report(bot: Bot):
         try:
             await bot.send_message(admin_id, text, parse_mode="Markdown")
         except Exception:
-            pass
+            logger.error(f"Не удалось отправить план на завтра {admin_id}")
 
 
 async def send_2h_reminders(bot: Bot):
-    """
-    Ищет слоты, которые начнутся ровно через 2 часа.
-    """
     now = datetime.now()
     target_time = now + timedelta(hours=2)
     
@@ -65,12 +69,12 @@ async def send_2h_reminders(bot: Bot):
     if not bookings:
         return
 
-    for user_id, start_time_iso, full_name in bookings:
+    for user_id, start_time_iso, _ in bookings:
         dt = datetime.fromisoformat(start_time_iso)
         time_str = dt.strftime("%H:%M")
         
         text = (
-            f"👋 Привет, {full_name}!\n"
+            f"👋 Привет!\n"
             f"⏳ Напоминаем: ваше занятие сегодня в **{time_str}**.\n"
             f"Ждем вас через 2 часа!"
         )
