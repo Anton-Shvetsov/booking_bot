@@ -59,7 +59,7 @@ IF EXIST "%REPO_DIR%\requirements.txt" (
 REM --- Настройка .env ---
 echo.
 echo ============================================================================
-echo Настройка переменных окружения
+echo Environment set up
 echo ============================================================================
 
 if exist "%REPO_DIR%\env.example" (
@@ -72,14 +72,14 @@ if exist "%REPO_DIR%\env.example" (
 )
 
 echo.
-set /p BOT_TOKEN=Введите BOT_TOKEN (токен Telegram-бота):
-set /p ADMIN_IDS=Введите ADMIN_IDS (ID администраторов через запятую):
+set /p BOT_TOKEN=Enter BOT_TOKEN (Telegram-bot token):
+set /p ADMIN_IDS=Enter ADMIN_IDS (Admin IDs separated by commas):
 
 powershell -Command "(Get-Content '%REPO_DIR%\.env') -replace 'BOT_TOKEN=.*', 'BOT_TOKEN=%BOT_TOKEN%' | Set-Content '%REPO_DIR%\.env'"
 powershell -Command "(Get-Content '%REPO_DIR%\.env') -replace 'ADMIN_IDS=.*', 'ADMIN_IDS=%ADMIN_IDS%' | Set-Content '%REPO_DIR%\.env'"
 
 echo.
-echo .env успешно настроен.
+echo .env successfully set up.
 
 REM --- Ярлык на Рабочем столе ---
 set "SHORTCUT_NAME=BookingBot.lnk"
@@ -96,12 +96,12 @@ cscript //nologo "%VBS_PATH%" "%TARGET_FILE%" "%SHORTCUT_NAME%"
 
 set "SHORTCUT_PATH=%USERPROFILE%\Desktop\%SHORTCUT_NAME%"
 if exist "%SHORTCUT_PATH%" (
-    echo Ярлык создан на Рабочем столе: %SHORTCUT_PATH%
+    echo Link created: %SHORTCUT_PATH%
 ) else (
-    echo Ярлык не создан. Запускайте бота через BookingBot\run.bat
+    echo Link NOT created. Run bot with BookingBot\run.bat
 )
 
 echo ============================================================================
-echo УСТАНОВКА ЗАВЕРШЕНА: %REPO_DIR%
+echo Set Up Finished: %REPO_DIR%
 echo ============================================================================
 pause
